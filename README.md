@@ -61,8 +61,19 @@ This is a completely static website that runs directly in your web browser witho
 ├── 📁 data/chart/          # Chart data (JSON files)
 ├── 📁 uploads/             # Static file uploads
 ├── ℹ️ start-here.html      # Usage guide
+├── ⚡ performance-guide.html # Performance optimization guide
+├── 🚀 deployment-guide.html # Deployment instructions
+├── 🤖 robots.txt           # Search engine directives
+├── 🗺️ sitemap.xml          # Site structure for SEO
+├── 📱 manifest.json        # Progressive Web App config
 └── 📖 README.md            # This file
 ```
+
+## 📚 Additional Guides
+
+- **⚡ [Performance Guide](performance-guide.html)** - Detailed performance analysis and optimization tips
+- **🚀 [Deployment Guide](deployment-guide.html)** - Step-by-step instructions for deploying to various platforms
+- **📖 [User Guide](start-here.html)** - Complete usage instructions and tips
 
 ## 💡 Usage Tips
 
