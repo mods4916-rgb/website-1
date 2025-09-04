@@ -63,6 +63,21 @@ function readJson(req) {
   });
 }
 
+// Basic CORS utilities (reflect origin and allow credentials)
+const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || '';
+function setCors(req, res) {
+  const origin = req.headers.origin || '';
+  // If FRONTEND_ORIGIN is configured, prefer that. Otherwise, reflect request Origin.
+  const allowOrigin = FRONTEND_ORIGIN || origin;
+  if (allowOrigin) {
+    res.setHeader('Access-Control-Allow-Origin', allowOrigin);
+    res.setHeader('Vary', 'Origin');
+  }
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+}
+
 // File cache for better performance
 const fileCache = new Map();
 const CACHE_MAX_SIZE = 50; // Max files to cache
@@ -165,6 +180,15 @@ const server = http.createServer((req, res) => {
   const start = Date.now();
   const parsed = url.parse(req.url, true);
   let pathname = parsed.pathname;
+  // Always apply CORS headers first
+  setCors(req, res);
+
+  // Handle CORS preflight globally
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
   
   // Handle common routes
   if (pathname === '/') pathname = '/index.html';
