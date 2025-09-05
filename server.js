@@ -83,6 +83,16 @@ const fileCache = new Map();
 const CACHE_MAX_SIZE = 50; // Max files to cache
 const CACHE_MAX_FILE_SIZE = 100 * 1024; // 100KB max file size to cache
 
+// Helper to invalidate cached entries for a given file
+function invalidateCacheFor(filePath) {
+  try {
+    const k1 = filePath;
+    const k2 = filePath + '_gzip';
+    if (fileCache.has(k1)) fileCache.delete(k1);
+    if (fileCache.has(k2)) fileCache.delete(k2);
+  } catch (_) {}
+}
+
 // Optimized MIME types
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -113,10 +123,11 @@ function acceptsGzip(req) {
 function serveFile(filePath, req, res) {
   const mimeType = getMimeType(filePath);
   const useGzip = acceptsGzip(req) && (mimeType.includes('text') || mimeType.includes('javascript') || mimeType.includes('json'));
+  const isHtml = path.extname(filePath).toLowerCase() === '.html';
   
   // Check cache first
   const cacheKey = filePath + (useGzip ? '_gzip' : '');
-  if (fileCache.has(cacheKey)) {
+  if (!isHtml && fileCache.has(cacheKey)) {
     const cached = fileCache.get(cacheKey);
     res.writeHead(200, {
       'Content-Type': mimeType,
@@ -146,17 +157,19 @@ function serveFile(filePath, req, res) {
     }
     
     function sendResponse(finalData, isCompressed = false) {
-      res.writeHead(200, {
+      const headers = {
         'Content-Type': mimeType,
-        'Cache-Control': 'public, max-age=3600',
+        // Do not cache HTML so admin saves are reflected immediately
+        'Cache-Control': isHtml ? 'no-store' : 'public, max-age=3600',
         'ETag': etag,
         'Content-Length': finalData.length,
         ...(isCompressed && { 'Content-Encoding': 'gzip' })
-      });
+      };
+      res.writeHead(200, headers);
       res.end(finalData);
-      
-      // Cache small files
-      if (data.length <= CACHE_MAX_FILE_SIZE && fileCache.size < CACHE_MAX_SIZE) {
+
+      // Cache small files (but never HTML)
+      if (!isHtml && data.length <= CACHE_MAX_FILE_SIZE && fileCache.size < CACHE_MAX_SIZE) {
         fileCache.set(cacheKey, { data: finalData, etag });
       }
     }
@@ -239,6 +252,8 @@ const server = http.createServer((req, res) => {
         const html = String(body.html || '');
         fs.writeFile(full, html, 'utf8', (err) => {
           if (err) return fail(res, 500, 'Failed to save');
+          // Invalidate any cached copies so the next request serves fresh content
+          invalidateCacheFor(full);
           ok(res);
         });
       } catch (e) {
@@ -284,6 +299,8 @@ const server = http.createServer((req, res) => {
               if (value === '' || value === '-') delete obj[key]; else obj[key] = value;
               fs.writeFile(file, JSON.stringify(obj, null, 2), 'utf8', (wErr) => {
                 if (wErr) return fail(res, 500, 'Failed to save');
+                // Invalidate any cached JSON files (served via API, but keep for completeness)
+                invalidateCacheFor(file);
                 ok(res);
               });
             });
