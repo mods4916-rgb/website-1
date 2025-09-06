@@ -3,8 +3,13 @@
 
 FROM php:8.2-apache
 
-# Enable required PHP extensions (PDO + SQLite)
-RUN docker-php-ext-install pdo pdo_sqlite
+# Enable required PHP extensions (PDO SQLite)
+# Note: PDO core ships with PHP; we only need to build pdo_sqlite and its system deps
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libsqlite3-dev \
+    && docker-php-ext-configure pdo_sqlite --with-pdo-sqlite \
+    && docker-php-ext-install pdo_sqlite \
+    && rm -rf /var/lib/apt/lists/*
 
 # Optional: enable Apache mod_rewrite if you rely on .htaccess
 RUN a2enmod rewrite
