@@ -1,0 +1,13 @@
+# Redirect legacy .html pages to their new .php counterparts
+# Works on Apache or any server honoring .htaccess (mod_rewrite)
+
+RewriteEngine On
+
+# Only redirect if the requested file doesn't actually exist as a .html file
+RewriteCond %{REQUEST_FILENAME} !-f
+
+# 301 redirect /foo.html -> /foo.php
+RewriteRule ^(.+)\.html$ /$1.php [R=301,L]
+
+# Optionally, force trailing slash-less root to index.php (uncomment if needed)
+# RewriteRule ^$ /index.php [L]

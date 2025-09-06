@@ -1,3 +1,6 @@
+<?php
+// index.php - PHP version of index.html. No server-side logic needed here.
+?>
 <!DOCTYPE html>
 <html lang="en" data-windsurf-page-id="578665421" data-windsurf-extension-id="foefnacdoacilokpfgininpfjnmlfikg"><head>
     <meta charset="utf-8">
@@ -249,7 +252,7 @@
           return;
         }
         try {
-          fetch('/api/auth-check', { credentials: 'include' })
+          fetch('/api/auth-check.php', { credentials: 'include' })
             .then(function(r){ return r.ok ? r.json() : Promise.reject(); })
             .then(function(j){ if (j && j.ok) { unlockEditing(); } else { lockEditing(); } })
             .catch(function(){ lockEditing(); });
@@ -273,13 +276,13 @@
                 <div class="newnav" contenteditable="false" style="">
                     <ul contenteditable="false" style="">
                         <li contenteditable="false" style="">
-                            <a href="index.html" class="active" contenteditable="true" style="">HOME</a>
+                            <a href="index.php" class="active" contenteditable="true" style="">HOME</a>
                         </li>
                         <li contenteditable="false" style="">
-                            <a href="chart.html" class="" contenteditable="true" style="">CHART</a>
+                            <a href="chart.php" class="" contenteditable="true" style="">CHART</a>
                         </li>
                         <li contenteditable="false" style="">
-                            <a href="login.html" contenteditable="true" style="">LOGIN</a>
+                            <a href="login.php" contenteditable="true" style="">LOGIN</a>
                         </li>
                     </ul>
                     <div class="clearfix" contenteditable="false" style=""></div>
@@ -303,6 +306,560 @@
             </div>
         </div>
     </section>
+    <script>
+      (function(){
+        function todayParts(){
+          const d = new Date();
+          return { y: String(d.getFullYear()), m: String(d.getMonth()+1).padStart(2,'0'), dd: String(d.getDate()).padStart(2,'0') };
+        }
+        function yesterdayParts(){
+          const d = new Date();
+          d.setDate(d.getDate() - 1);
+          return { y: String(d.getFullYear()), m: String(d.getMonth()+1).padStart(2,'0'), dd: String(d.getDate()).padStart(2,'0') };
+        }
+        function slugifyGameLocal(name){
+          return String(name||'').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+        }
+        function gameSlugFor(name){
+          const l = String(name||'').trim().toLowerCase();
+          const map = {
+            'sadar bazar': 'sadar-bazar',
+            'gwalior': 'gwalior',
+            'delhi bazar': 'delhi-bazar',
+            'saharanpur city': 'saharanpur-city',
+            'shri ganesh': 'shri-ganesh',
+            'faridabad': 'faridabad',
+            'shimla super': 'shimla-super',
+            'gaziyabad': 'gaziyabad',
+            'bilaspur': 'bilaspur',
+            'gali': 'gali'
+          };
+          return map[l] || slugifyGameLocal(l);
+        }
+        function storageKey(game, year){ return `yearchart:${gameSlugFor(game)}:${year}`; }
+        function loadDataLocal(game, year){ try { return JSON.parse(localStorage.getItem(storageKey(game,year))||'{}'); } catch { return {}; } }
+        async function fetchChart(game, year){
+          const local = loadDataLocal(game, year);
+          try {
+            const qs = new URLSearchParams({ game: gameSlugFor(game), year });
+            const res = await fetch(`/api/chart.php?${qs.toString()}`, { headers: { 'Accept': 'application/json' } });
+            if (!res.ok) throw new Error('net');
+            const j = await res.json();
+            if (j && j.ok && j.data && typeof j.data === 'object') return Object.assign({}, local, j.data);
+          } catch(e){}
+          return local;
+        }
+        function renderIntoFeaturedRect(raw){
+          const wrapRect = document.querySelector('.featured-rect');
+          if (!wrapRect) return;
+          const value = String(raw||'').trim();
+          const nums = value.match(/\d+/g) || [];
+          const a = nums[0] || '';
+          const b = nums[1] || '';
+          let numEls = wrapRect.querySelectorAll('.result .num');
+          if (numEls.length < 2) {
+            const resultRow = wrapRect.querySelector('.result');
+            if (resultRow) {
+              resultRow.innerHTML = '<span class="num"></span>&nbsp;<img class="sep" src="uploads/arrow.gif" alt=">">&nbsp;<span class="num"></span>';
+              numEls = wrapRect.querySelectorAll('.result .num');
+            }
+          }
+          if (numEls[0]) numEls[0].textContent = a;
+          if (numEls[1]) numEls[1].textContent = b;
+        }
+        function renderTopFeatured(game, raw){
+          try {
+            const nameEl = document.querySelector('.sattaname p');
+            if (nameEl) nameEl.textContent = String(game||'').toUpperCase();
+            const resultWrap = document.querySelector('.sattaresult');
+            if (resultWrap){
+              const value = String(raw||'').trim();
+              const nums = value.match(/\d+/g) || [];
+              const el = resultWrap.querySelector('.num');
+              // For Disawer, prefer RIGHT value (second number). For others, first number.
+              const slug = gameSlugFor(game);
+              let display = '';
+              if (slug === 'disawer') {
+                display = (nums.length >= 2 ? nums[1] : (nums[nums.length-1] || value)).trim();
+              } else {
+                display = (nums[0] || value || '').trim();
+              }
+              if (el) el.textContent = display;
+            }
+          } catch(_) {}
+        }
+
+        // Cross-tab channel (more reliable than storage events)
+        let siteSyncChan = null;
+        try { if ('BroadcastChannel' in window) { siteSyncChan = new BroadcastChannel('site-sync'); } } catch(_) {}
+
+        // Expose a global refresh so admin or other tabs can force reapply immediately
+        window.refreshDisplays = function(){
+          try {
+            fetchAndApplyGameDisplays();
+            fetchAndRenderLatestTop();
+          } catch(_) {}
+        };
+        if (siteSyncChan) {
+          siteSyncChan.onmessage = function(ev){
+            try {
+              const data = ev && ev.data;
+              if (data && data.type === 'refresh') {
+                window.refreshDisplays && window.refreshDisplays();
+              }
+            } catch(_) {}
+          };
+        }
+        // Cross-tab notify: when localStorage key changes, refresh displays
+        window.addEventListener('storage', function(e){
+          try {
+            if (!e) return;
+            if ((e.key === 'games_refresh' || e.key === 'chart_refresh') && e.newValue) {
+              window.refreshDisplays && window.refreshDisplays();
+            }
+          } catch(_) {}
+        });
+        async function fetchAndRenderLatestTop(){
+          try {
+            const y = String(new Date().getFullYear());
+            const res = await fetch(`/api/chart.php?latest=1&year=${encodeURIComponent(y)}&_=${Date.now()}` , { headers: { 'Accept': 'application/json' } });
+            if (!res.ok) return;
+            const j = await res.json();
+            if (j && j.ok && j.latest && j.latest.value) {
+              const slug = String(j.latest.game || '').replace(/-/g, ' ');
+              renderTopFeatured(slug, String(j.latest.value||''));
+            }
+          } catch(_) {}
+        }
+        async function fetchAndRenderDisawer(){
+          const { y, m, dd } = todayParts();
+          const todayKey = `${dd}-${m}`;
+          try {
+            const obj = await fetchChart('Disawer', y);
+            if (obj && typeof obj === 'object') {
+              let val = obj[todayKey] || '';
+              if (!val) {
+                const keys = Object.keys(obj).filter(k => /^\d{2}-\d{2}$/.test(k));
+                if (keys.length) {
+                  keys.sort((a,b) => {
+                    const [da, ma] = a.split('-').map(n=>parseInt(n,10));
+                    const [db, mb] = b.split('-').map(n=>parseInt(n,10));
+                    return new Date(y, ma-1, da) - new Date(y, mb-1, db);
+                  });
+                  val = obj[keys[keys.length-1]] || '';
+                }
+              }
+              if (val) renderIntoFeaturedRect(val);
+            }
+          } catch(e){}
+        }
+        function prefillFromStorage(){
+          const table = document.querySelector('.tablebox1 table');
+          if (!table) return;
+          const tbody = table.querySelector('tbody');
+          if (!tbody) return;
+          const { y, m, dd } = todayParts();
+          const keyToday = `${dd}-${m}`;
+          const yst = yesterdayParts();
+          const keyYest = `${yst.dd}-${yst.m}`;
+          const rows = Array.from(tbody.querySelectorAll('tr'));
+          const cache = new Map();
+          const cachePrevYear = new Map();
+          const BATCH = 6; let i = 0;
+          const step = async () => {
+            let count = 0;
+            while (i < rows.length && count < BATCH) {
+              const tr = rows[i++];
+              const a = tr.querySelector('.gamenameeach');
+              if (!a) { count++; continue; }
+              const game = (a.textContent||'').trim();
+              const tds = tr.querySelectorAll('td');
+              if (tds.length >= 3) {
+                const prevTd = tds[1];
+                const todayTd = tds[2];
+                let objToday = cache.get(game);
+                if (!objToday) { objToday = await fetchChart(game, y); cache.set(game, objToday); }
+                if (objToday && Object.prototype.hasOwnProperty.call(objToday, keyToday)) {
+                  todayTd.textContent = objToday[keyToday] || '';
+                }
+                // Yesterday may be in previous year
+                if (yst.y === y) {
+                  if (objToday && Object.prototype.hasOwnProperty.call(objToday, keyYest)) {
+                    prevTd.textContent = objToday[keyYest] || '-';
+                  }
+                } else {
+                  let objPrev = cachePrevYear.get(game);
+                  if (!objPrev) { objPrev = await fetchChart(game, yst.y); cachePrevYear.set(game, objPrev); }
+                  if (objPrev && Object.prototype.hasOwnProperty.call(objPrev, keyYest)) {
+                    prevTd.textContent = objPrev[keyYest] || '-';
+                  }
+                }
+              }
+              count++;
+            }
+            if (i < rows.length) setTimeout(step, 0);
+          };
+          setTimeout(step, 0);
+        }
+        // --- Admin helpers and view hardening ---
+        const urlParams = new URLSearchParams(location.search);
+        const isAdmin = urlParams.get('admin') === '1' || urlParams.get('admin') === 1 || urlParams.get('admin') === true;
+        const SAFE_MODE = urlParams.get('safe') === '1';
+        const SID = urlParams.get('sid') || '';
+
+        // Pending change queue for admin saves
+        const pending = new Map(); // key: `${game}|${year}|${key}` => value
+        function makeKey(game, year, key){ return `${game}|${year}|${key}`; }
+        function apiHeaders(){ const h = { 'Content-Type':'application/json','Accept':'application/json' }; if (SID) h['Authorization'] = 'Bearer ' + SID; return h; }
+        function queueChange(game, year, key, value){
+          try {
+            const k = makeKey(gameSlugFor(game), String(year), String(key));
+            if (value === '' || value === '-') pending.delete(k); else pending.set(k, String(value));
+            const btn = document.getElementById('admin-save-btn'); if (btn) btn.disabled = pending.size === 0;
+          } catch(_) {}
+        }
+        async function commitPending(){
+          if (!pending.size) return;
+          const entries = Array.from(pending.entries());
+          const payloads = entries.map(([k,v]) => {
+            const [game, year, key] = k.split('|');
+            return { game, year, key, value: v };
+          });
+          try {
+            // POST sequentially to keep it simple and robust on PHP built-in server
+            for (const p of payloads) {
+              await fetch('/api/chart.php?game=' + encodeURIComponent(p.game) + '&year=' + encodeURIComponent(p.year), {
+                method: 'POST', credentials: 'include', headers: apiHeaders(),
+                body: JSON.stringify({ key: p.key, value: p.value })
+              });
+            }
+            pending.clear();
+            const btn = document.getElementById('admin-save-btn'); if (btn) { btn.disabled = true; btn.textContent = 'Saved'; setTimeout(()=>{ btn.textContent = 'Save'; }, 1000); }
+            // Notify other tabs to refresh charts immediately
+            try { localStorage.setItem('chart_refresh', String(Date.now())); } catch(_) {}
+            try { siteSyncChan && siteSyncChan.postMessage({ type: 'refresh', at: Date.now() }); } catch(_) {}
+          } catch(e){
+            const btn = document.getElementById('admin-save-btn'); if (btn) { btn.textContent = 'Retry Save'; btn.disabled = false; }
+          }
+        }
+
+        function lockVisitorView(){
+          if (isAdmin) return;
+          const table = document.querySelector('.tablebox1 table');
+          if (!table) return;
+          const tbody = table.querySelector('tbody');
+          if (!tbody) return;
+          tbody.querySelectorAll('tr').forEach(tr => {
+            const tds = tr.querySelectorAll('td');
+            if (tds.length < 3) return;
+            const prevTd = tds[1];
+            const resultTd = tds[2];
+            [prevTd, resultTd].forEach(td => {
+              if (!td) return;
+              td.setAttribute('contenteditable','false');
+              td.style.pointerEvents = 'none';
+              td.style.userSelect = 'none';
+              td.style.outline = 'none';
+            });
+          });
+        }
+
+        function applyWaitShortcodeToResults(){
+          const table = document.querySelector('.tablebox1 table');
+          if (!table) return;
+          const tbody = table.querySelector('tbody');
+          if (!tbody) return;
+          const IMG_SRC = 'uploads/wait.gif';
+          tbody.querySelectorAll('tr').forEach(tr => {
+            const tds = tr.querySelectorAll('td');
+            if (tds.length < 3) return;
+            const cols = [tds[1], tds[2]];
+            cols.forEach(td => {
+              const txt = (td.textContent||'').trim();
+              if (txt === '*w' && !td.querySelector('img')) {
+                td.innerHTML = '<strong class="waitimg"><img src="'+IMG_SRC+'" class="img-responsive" width="40" height="40" alt="wait"></strong>';
+              }
+            });
+          });
+        }
+
+        function bindPersist(){
+          if (!isAdmin) return; // only admins can queue changes
+          const table = document.querySelector('.tablebox1 table');
+          if (!table) return;
+          const tbody = table.querySelector('tbody');
+          if (!tbody) return;
+          const tgtToday = todayParts();
+          const keyToday = `${tgtToday.dd}-${tgtToday.m}`;
+          const tgtYest = yesterdayParts();
+          const keyYest = `${tgtYest.dd}-${tgtYest.m}`;
+          async function handle(tr, changedTd){
+            const a = tr.querySelector('.gamenameeach');
+            if (!a) return;
+            function rowSlugFromLink(a){
+              if (!a) return '';
+              const ds = (a.dataset && a.dataset.gameSlug) ? a.dataset.gameSlug : '';
+              return ds || gameSlugFor((a.textContent || '').trim());
+            }
+            function getRowSlug(tr){ const a = tr.querySelector('.gamenameeach'); return rowSlugFromLink(a); }
+            const game = rowSlugFromLink(a);
+            const tds = tr.querySelectorAll('td');
+            if (tds.length < 3) return;
+            const prevTd = tds[1];
+            const todayTd = tds[2];
+            // Determine which column was changed and queue only
+            if (changedTd && changedTd.isSameNode(todayTd)) {
+              let val = (todayTd.textContent || '').trim();
+              if (val.toLowerCase() === '*w') {
+                todayTd.innerHTML = '<strong class="waitimg"><img src="uploads/wait.gif" class="img-responsive" width="30" height="30"></strong>';
+                queueChange(game, tgtToday.y, keyToday, '');
+                return;
+              }
+              queueChange(game, tgtToday.y, keyToday, val);
+              renderTopFeatured(game, val);
+            } else if (changedTd && changedTd.isSameNode(prevTd)) {
+              const valPrev = (prevTd.textContent || '').trim();
+              queueChange(game, tgtYest.y, keyYest, valPrev);
+            } else {
+              // Fallback: queue both columns
+              const vToday = (todayTd.textContent || '').trim();
+              queueChange(game, tgtToday.y, keyToday, vToday);
+              const vPrev = (prevTd.textContent || '').trim();
+              queueChange(game, tgtYest.y, keyYest, vPrev);
+            }
+            // Update the top featured box to reflect the row just edited
+            try {
+              const tVal = (todayTd.textContent || '').trim();
+              const pVal = (prevTd.textContent || '').trim();
+              const displayVal = tVal !== '' && tVal !== '-' ? tVal : pVal;
+              if (displayVal) renderTopFeatured(game, displayVal);
+            } catch(_){ }
+          }
+          tbody.addEventListener('input', (e) => {
+            const td = e.target.closest('td');
+            const tr = td && td.closest('tr');
+            if (!tr) return;
+            handle(tr, td);
+          });
+          tbody.addEventListener('blur', (e) => {
+            const td = e.target.closest('td');
+            const tr = td && td.closest('tr');
+            if (!tr) return;
+            handle(tr, td);
+          }, true);
+        }
+
+        function enableAdminEditing(){
+          if (!isAdmin) return; // only admins can edit
+          const table = document.querySelector('.tablebox1 table');
+          if (!table) return;
+          const tbody = table.querySelector('tbody');
+          if (!tbody) return;
+          function unblockAncestors(node){
+            let cur = node.parentElement;
+            while (cur && cur !== document.body){
+              if (cur.hasAttribute('contenteditable') && cur.getAttribute('contenteditable') === 'false') {
+                cur.removeAttribute('contenteditable');
+              }
+              cur = cur.parentElement;
+            }
+          }
+          tbody.querySelectorAll('tr').forEach(tr => {
+            const tds = tr.querySelectorAll('td');
+            if (tds.length < 3) return;
+            const nameTd = tds[0];
+            const prevTd = tds[1];
+            const todayTd = tds[2];
+            // Make first column (game name + time) editable
+            if (nameTd) {
+              unblockAncestors(nameTd);
+              nameTd.setAttribute('contenteditable','true');
+              nameTd.setAttribute('tabindex','0');
+              nameTd.style.outline = '1px dashed #999';
+              nameTd.style.userSelect = 'text';
+              nameTd.style.pointerEvents = 'auto';
+              // Prevent anchor default navigation while editing
+              nameTd.querySelectorAll('a').forEach(a => {
+                a.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); });
+                if (!a.dataset.gameSlug) { a.dataset.gameSlug = gameSlugFor((a.textContent||'').trim()); }
+              });
+              const onCommitNameTime = () => {
+                try {
+                  const a = nameTd.querySelector('.gamenameeach');
+                  if (!a) return;
+                  // Stabilize slug from dataset even if name text changes
+                  if (!a.dataset.gameSlug) { a.dataset.gameSlug = gameSlugFor((a.textContent||'').trim()); }
+                  const slug = a.dataset.gameSlug;
+                  // Parse name/time: first non-empty line as name, second non-empty as time
+                  const lines = (nameTd.innerText || '').split(/\n+/).map(s => s.trim()).filter(Boolean);
+                  const nm = lines[0] || (a.textContent||'').trim();
+                  const tm = lines.length > 1 ? lines[1] : '';
+                  a.textContent = nm; // normalize link text
+                  // Ensure time element exists
+                  setTimeInNameCell(nameTd, tm);
+                  saveGameDisplay(slug, nm, tm);
+                  // Notify other tabs to refresh immediately
+                  try { localStorage.setItem('games_refresh', String(Date.now())); } catch(_) {}
+                  try { siteSyncChan && siteSyncChan.postMessage({ type: 'refresh', at: Date.now() }); } catch(_) {}
+                } catch(_) {}
+              };
+              nameTd.addEventListener('input', onCommitNameTime);
+              nameTd.addEventListener('blur', onCommitNameTime);
+            }
+            [prevTd, todayTd].forEach(td => {
+              unblockAncestors(td);
+              td.setAttribute('contenteditable','true');
+              td.setAttribute('tabindex','0');
+              td.style.outline = '1px dashed #999';
+              td.style.userSelect = 'text';
+              td.style.pointerEvents = 'auto';
+              td.addEventListener('keydown', (evt) => {
+                const printable = evt.key.length === 1 || ['Backspace','Delete','Enter','Space'].includes(evt.key);
+                if (printable && td.querySelector('img')) { td.textContent = ''; }
+              });
+              td.addEventListener('focusin', () => { if (td.querySelector('img')) td.textContent = ''; });
+            });
+          });
+        }
+
+        function bindFeaturedRectEditing(){
+          try {
+            if (!isAdmin) return; // only admins can edit
+            const rect = document.querySelector('.featured-rect.disawer-hero');
+            if (!rect) return;
+            const resultRow = rect.querySelector('.result');
+            if (!resultRow) return;
+            function unblockAncestors(node){
+              let cur = node && node.parentElement;
+              while (cur && cur !== document.body){
+                if (cur.hasAttribute('contenteditable') && cur.getAttribute('contenteditable') === 'false') {
+                  cur.removeAttribute('contenteditable');
+                }
+                cur = cur.parentElement;
+              }
+            }
+            unblockAncestors(resultRow);
+            const currentNums = resultRow.querySelectorAll('.num');
+            if (currentNums.length === 0) {
+              resultRow.innerHTML = '<span class="num"></span>&nbsp;<img class="sep" src="uploads/arrow.gif" alt=">">&nbsp;<span class="num"></span>';
+            } else if (currentNums.length === 1) {
+              currentNums[0].insertAdjacentHTML('afterend', '&nbsp;<img class="sep" src="uploads/arrow.gif" alt=">">&nbsp;<span class="num"></span>');
+            } else if (!resultRow.querySelector('img.sep')) {
+              currentNums[0].insertAdjacentHTML('afterend', ' <img class="sep" src="uploads/arrow.gif" alt=">"> ');
+            }
+            const nums = resultRow.querySelectorAll('.num');
+            nums.forEach(el => {
+              el.setAttribute('contenteditable','true');
+              el.setAttribute('tabindex','0');
+              el.style.outline = '1px dashed #999';
+              el.style.pointerEvents = 'auto';
+              el.style.userSelect = 'text';
+              el.addEventListener('mousedown', (evt) => {
+                try { evt.stopPropagation(); evt.stopImmediatePropagation(); } catch {}
+                evt.preventDefault();
+                el.focus();
+              });
+              el.addEventListener('keydown', (evt) => {
+                const allowed = /[0-9]/.test(evt.key) || ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'].includes(evt.key);
+                if (!allowed) evt.preventDefault();
+              });
+              const onCommit = async () => {
+                const a = (resultRow.querySelectorAll('.num')[0]?.textContent||'').trim();
+                const b = (resultRow.querySelectorAll('.num')[1]?.textContent||'').trim();
+                const val = [a,b].filter(Boolean).join(' ');
+                const { y, m, dd } = todayParts();
+                const key = `${dd}-${m}`;
+                queueChange('Disawer', y, key, val);
+                renderTopFeatured('Disawer', val);
+              };
+              el.addEventListener('input', onCommit);
+              el.addEventListener('blur', onCommit);
+            });
+          } catch(e) { /* no-op */ }
+        }
+
+        window.addEventListener('DOMContentLoaded', function(){
+          if (SAFE_MODE) {
+            try { document.querySelectorAll('marquee').forEach(m => m.stop && m.stop()); } catch(e){}
+          }
+          prefillFromStorage();
+          // no display-name persistence
+          applyWaitShortcodeToResults();
+          fetchAndRenderDisawer();
+          setInterval(fetchAndRenderDisawer, 60000);
+          // Annotate all rows with a stable slug on first load (before applying names/times)
+          try {
+            const tbody = document.querySelector('.tablebox1 tbody');
+            if (tbody) {
+              tbody.querySelectorAll('a.gamenameeach').forEach(a => {
+                if (!a.dataset.gameSlug) { a.dataset.gameSlug = gameSlugFor((a.textContent||'').trim()); }
+              });
+            }
+          } catch(_) {}
+
+          if (isAdmin) {
+            bindPersist();
+            enableAdminEditing();
+            bindFeaturedRectEditing();
+            // Inject Save button for admin
+            const btn = document.createElement('button');
+            btn.id = 'admin-save-btn';
+            btn.textContent = 'Save';
+            btn.style.position = 'fixed';
+            btn.style.bottom = '16px';
+            btn.style.right = '16px';
+            btn.style.zIndex = '10000';
+            btn.style.padding = '10px 16px';
+            btn.style.fontWeight = 'bold';
+            btn.style.borderRadius = '10px';
+            btn.style.border = '2px solid black';
+            btn.style.background = 'orange';
+            btn.style.color = 'black';
+            btn.disabled = true;
+            btn.addEventListener('click', (e)=>{ e.preventDefault(); btn.textContent = 'Saving...'; btn.disabled = true; commitPending(); });
+            document.body.appendChild(btn);
+
+            // Inject Apply button for admin (forces frontend refresh across tabs)
+            const applyBtn = document.createElement('button');
+            applyBtn.id = 'admin-apply-btn';
+            applyBtn.textContent = 'Apply';
+            applyBtn.style.position = 'fixed';
+            applyBtn.style.bottom = '16px';
+            applyBtn.style.right = '110px';
+            applyBtn.style.zIndex = '10000';
+            applyBtn.style.padding = '10px 16px';
+            applyBtn.style.fontWeight = 'bold';
+            applyBtn.style.borderRadius = '10px';
+            applyBtn.style.border = '2px solid black';
+            applyBtn.style.background = '#ffd54f';
+            applyBtn.style.color = 'black';
+            applyBtn.title = 'Force refresh on public pages';
+            applyBtn.addEventListener('click', (e)=>{
+              e.preventDefault();
+              try {
+                localStorage.setItem('games_refresh', String(Date.now()));
+                localStorage.setItem('chart_refresh', String(Date.now()));
+              } catch(_) {}
+              // Also refresh within this admin view instantly
+              if (window.refreshDisplays) window.refreshDisplays();
+              try { siteSyncChan && siteSyncChan.postMessage({ type: 'refresh', at: Date.now() }); } catch(_) {}
+            });
+            document.body.appendChild(applyBtn);
+          } else {
+            lockVisitorView();
+            // For visitors, always show the last updated game/value at top
+            fetchAndRenderLatestTop();
+            setInterval(fetchAndRenderLatestTop, 60000);
+            // Apply saved game names/times to table
+            fetchAndApplyGameDisplays();
+            setInterval(fetchAndApplyGameDisplays, 60000);
+            // Extra: force-refresh displays immediately and shortly after load
+            try { window.refreshDisplays && window.refreshDisplays(); } catch(_) {}
+            try { setTimeout(function(){ window.refreshDisplays && window.refreshDisplays(); }, 1200); } catch(_) {}
+          }
+        });
+      })();
+    </script>
 
     <!-- Latest updated game pill (unused now; we update featured box instead) -->
     <div id="latest-update" aria-live="polite" contenteditable="false" style=""></div>
@@ -313,7 +870,7 @@
                 <div class="col-md-12 text-center" style="">
                     <div class="liveresult" contenteditable="false" style="">
                         <div class="datetime" contenteditable="false" style="">
-                            <div id="clockbox" contenteditable="true" style="">September 5, 2025 7:42:07 PM</div>
+                            <div id="clockbox" contenteditable="true" style="">September 5, 2025 8:00:13 PM</div>
                         </div>
                     </div>
 
@@ -322,10 +879,10 @@
                     <hr style="height: 2px; opacity: 0.9;" contenteditable="false">
                     <div class="gamenotice" contenteditable="false" style=""><span class="msg" contenteditable="true">हा भाई यही आती हे सबसे पहले खबर रूको और देखो</span></div>
                     <div class="sattaname" contenteditable="true" style="outline: rgb(153, 153, 153) dashed 1px; user-select: text; pointer-events: auto;" tabindex="0">
-                        <p contenteditable="true" style="user-select: text; pointer-events: auto; outline: rgb(153, 153, 153) dashed 1px;" tabindex="0">DISAWER</p>
+                        <p contenteditable="true" style="user-select: text; pointer-events: auto; outline: rgb(153, 153, 153) dashed 1px;" tabindex="0">FARIDABAD</p>
                     </div>
                     <div class="sattaresult" contenteditable="false" style="">
-                        <font contenteditable="false" style=""><span contenteditable="false" style=""><span class="num">72</span></span></font>
+                        <font contenteditable="false" style=""><span contenteditable="false" style=""><span class="num">52</span></span></font>
                     </div>
 
                 </div>
@@ -367,19 +924,18 @@
 
 
 
-
     <section class="sattadividerr" style="">
         <div class="container" style="">
             <div class="col-md-12 text-center" style="">
                 <div class="featured-rect disawer-hero">
-                  <a href="/chart/2/2025" class="gamenameeach" contenteditable="false" style="display:block; margin-bottom: 4px;">
+                  <a  class="gamenameeach" contenteditable="false" style="display:block; margin-bottom: 4px;">
                       <h3 class="name" contenteditable="true" style="margin: 0;">DISAWER</h3>
                   </a>
-                  <div class="time" contenteditable="true" tabindex="0" style="user-select: text; pointer-events: auto; outline: rgb(153, 153, 153) dashed 1px;">05:10 AM</div>
+                  <div class="time" contenteditable="true" tabindex="0" style="user-select: text; pointer-events: auto; outline: rgb(153, 153, 153) dashed 1px;">05:15 AM</div>
                   <div class="result">
-                    <span class="num" contenteditable="true" tabindex="0" style="pointer-events: auto; user-select: text; outline: rgb(153, 153, 153) dashed 1px;">73</span>
-                    &nbsp;<img class="sep" src="uploads/arrow.gif" alt="&gt;" contenteditable="false">&nbsp;
-                    <span class="num" contenteditable="true" tabindex="0" style="pointer-events: auto; user-select: text; outline: rgb(153, 153, 153) dashed 1px;">72</span>
+                    <span class="num" contenteditable="true" tabindex="0" style="pointer-events: auto; user-select: text; outline: rgb(153, 153, 153) dashed 1px;">52</span>
+                    &nbsp;<img class="sep" src="uploads/arrow.gif" alt=">" contenteditable="false">&nbsp;
+                    <span class="num" contenteditable="true" tabindex="0" style="pointer-events: auto; user-select: text; outline: rgb(153, 153, 153) dashed 1px;"></span>
                   </div>
                 </div>
                 <style contenteditable="false" style="">
@@ -413,26 +969,26 @@
                 <div class="card" style="box-sizing: border-box; position: relative; display: flex; flex-direction: column; min-width: 0px; overflow-wrap: break-word; background-clip: border-box; border: 0px; border-radius: 0.25rem;" contenteditable="false">
                     <div class="card-body" style="box-sizing: border-box; flex: 1 1 auto; min-height: 1px; padding: 1.25rem; border: dashed red; background: linear-gradient(rgb(255, 216, 0), rgb(255, 255, 255)); border-radius: 20px; line-height: 15px;" contenteditable="false">
                         <p contenteditable="false" style=""><strong contenteditable="true" style="">सीधे सट्टा कंपनी का No 1 खाईवाल</strong></p>
-                        <p contenteditable="false" style=""><strong contenteditable="true" style="">♕</strong><strong contenteditable="true" style="">♕</strong><strong style="font-size: 20px;" contenteditable="true">&nbsp; VIRAJ BHAI  KHAIWAL ♕♕</strong></p>
-                        <p contenteditable="false" style=""><big contenteditable="false" style=""><strong contenteditable="true" style="">⏰ सदर बाजार ---------- 1:20 pm</strong></big></p>
+                        <p contenteditable="false" style=""><strong contenteditable="true" style="">♕</strong><strong contenteditable="true" style="">♕</strong><strong style="font-size: 20px;" contenteditable="true">&nbsp; BANSAL BHAI  KHAIWAL ♕♕</strong></p>
+                        <p contenteditable="false" style=""><big contenteditable="false" style=""><strong contenteditable="true" style="">⏰ सदर बाजार ---------- 1:30 pm</strong></big></p>
 
-                        <p contenteditable="false" style=""><big contenteditable="false" style=""><strong contenteditable="true" style="">⏰ ग्वालियर ------------- 2:20 pm</strong></big></p>
+                        <p contenteditable="false" style=""><big contenteditable="false" style=""><strong contenteditable="true" style="">⏰ ग्वालियर ------------- 2:30 pm</strong></big></p>
 
                         <p contenteditable="false" style=""><big contenteditable="false" style=""><strong contenteditable="true" style="">⏰ दिल्ली बाजार&nbsp;--------- 2:55 Pm</strong></big></p>
 
                         <p contenteditable="false" style=""><big contenteditable="false" style=""><strong contenteditable="true" style="">⏰ सहारनपुरसिटी ------------&nbsp; 3:50 pm</strong></big></p>
 
-                        <p contenteditable="false" style=""><big contenteditable="false" style=""><strong contenteditable="true" style="">⏰ श्री गणेश  --------- ------ 4:20&nbsp;pm</strong></big></p>
+                        <p contenteditable="false" style=""><big contenteditable="false" style=""><strong contenteditable="true" style="">⏰ श्री गणेश  --------- ------ 4:25&nbsp;pm</strong></big></p>
 
                         <p contenteditable="false" style=""><big contenteditable="false" style=""><strong contenteditable="true" style="">⏰ फरीदाबाद -------------5:50 pm</strong></big></p>
 
                         <p contenteditable="false" style=""><big contenteditable="false" style=""><strong contenteditable="true" style="">⏰ शिमला सुपर --------- ------ 7:20 pm</strong></big></p>
 
-                        <p contenteditable="false" style=""><big contenteditable="false" style=""><strong contenteditable="true" style="">⏰ गाज़ियाबाद ----------- 8:50 pm</strong></big></p>
+                        <p contenteditable="false" style=""><big contenteditable="false" style=""><strong contenteditable="true" style="">⏰ गाज़ियाबाद ----------- 9:00 pm</strong></big></p>
 
-                        <p contenteditable="false" style=""><big contenteditable="false" style=""><strong contenteditable="true" style="">⏰ बिलासपुर ---------------10:15&nbsp;pm</strong></big></p>
+                        <p contenteditable="false" style=""><big contenteditable="false" style=""><strong contenteditable="true" style="">⏰ बिलासपुर ---------------10:25&nbsp;pm</strong></big></p>
 
-                        <p contenteditable="false" style=""><big contenteditable="false" style=""><strong contenteditable="true" style="">⏰ गली ----------------- 11:20 pm</strong></big></p>
+                        <p contenteditable="false" style=""><big contenteditable="false" style=""><strong contenteditable="true" style="">⏰ गली ----------------- 11:30 pm</strong></big></p>
 
                         <p contenteditable="false" style=""><big contenteditable="false" style=""><strong contenteditable="true" style="">⏰ दिसावर -------------- 1:30 Am</strong></big></p>
                         <!-- <p><strong>♕</strong><strong>♕&nbsp;PAYMENT OPTION♕♕</strong></p>
@@ -442,7 +998,7 @@
                         <p contenteditable="false" style=""><strong contenteditable="true" style="">♕</strong><strong contenteditable="true" style="">♕ जोड़ी रेट</strong><strong contenteditable="true" style="">♕</strong><strong contenteditable="true" style="">♕</strong></p>
                         <p contenteditable="false" style=""><strong contenteditable="true" style="">जोड़ी रेट 10-------960</strong></p>
                         <p contenteditable="false" style=""><strong contenteditable="true" style="">हरूफ रेट 100-----960</strong></p>
-                        <p contenteditable="false" style=""><strong style="font-size: 20px;" contenteditable="true">♕♕ VIRAJ BHAI  KHAIWAL&nbsp;♕♕</strong></p>
+                        <p contenteditable="false" style=""><strong style="font-size: 20px;" contenteditable="true">♕♕ BANSAL BHAI  KHAIWAL&nbsp;♕♕</strong></p>
                         <h3 contenteditable="false" style=""><a href="https://Wa.me/" target="_blank" contenteditable="false" style=""><strong contenteditable="true" style="">Game Play करने के लिये नीचे लिंक पर क्लिक करे</strong></a></h3>
                         <p contenteditable="false" style="">
                             <a href="https://Wa.me/" target="_blank" contenteditable="false" style=""><img src="https://lucky-satta.com/whatsAppChat.png" style="height: 80px; margin: auto; width: 230px;" contenteditable="false"></a>
@@ -475,7 +1031,7 @@
                                 <tr>
                                     <td class="forYellowGradient" contenteditable="false" style="">
                                         <span class="gamenameeach" contenteditable="true" style="">SADAR BAZAR</span>
-                                        <br contenteditable="false" style=""> <span contenteditable="true">01:10 AM</span> <br contenteditable="false" style="">
+                                        <br contenteditable="false" style=""> <span contenteditable="true">01:40 AM</span> <br contenteditable="false" style="">
                                     </td>
                                     <td contenteditable="true" style="">92</td>
                                     <td contenteditable="true" style="user-select: text; pointer-events: auto; outline: rgb(153, 153, 153) dashed 1px;" tabindex="0">63</td>
@@ -487,7 +1043,7 @@
                                 <tr>
                                     <td class="forYellowGradient" contenteditable="false" style="">
                                         <span class="gamenameeach" contenteditable="true" style="">GWALIOR</span>
-                                        <br contenteditable="false" style=""> <span contenteditable="true">02:50 PM</span> <br contenteditable="false" style="">
+                                        <br contenteditable="false" style=""> <span contenteditable="true">02:40 PM</span> <br contenteditable="false" style="">
                                     </td>
                                     <td contenteditable="true" style="">68</td>
                                     <td contenteditable="true" style="user-select: text; pointer-events: auto; outline: rgb(153, 153, 153) dashed 1px;" tabindex="0">78</td>
@@ -507,7 +1063,7 @@
                                 <tr>
                                     <td class="forYellowGradient" contenteditable="false" style="">
                                         <span class="gamenameeach" contenteditable="true" style="">Saharanpur City</span>
-                                        <br contenteditable="false" style=""> <span contenteditable="true">04:00 PM</span> <br contenteditable="false" style="">
+                                        <br contenteditable="false" style=""> <span contenteditable="true">04:05 PM</span> <br contenteditable="false" style="">
                                     </td>
                                     <td contenteditable="true" style="">99</td>
                                     <td contenteditable="true" style="user-select: text; pointer-events: auto; outline: rgb(153, 153, 153) dashed 1px;" tabindex="0">15</td>
@@ -516,7 +1072,7 @@
                                 <tr>
                                     <td class="forYellowGradient" contenteditable="false" style="">
                                         <span class="gamenameeach" contenteditable="true" style="">SHRI GANESH</span>
-                                        <br contenteditable="false" style=""> <span contenteditable="true">04:40 PM</span> <br contenteditable="false" style="">
+                                        <br contenteditable="false" style=""> <span contenteditable="true">04:45 PM</span> <br contenteditable="false" style="">
                                     </td>
                                     <td contenteditable="true" style="">86</td>
                                     <td contenteditable="true" style="user-select: text; pointer-events: auto; outline: rgb(153, 153, 153) dashed 1px;" tabindex="0">55</td>
@@ -535,10 +1091,10 @@
                                 <tr>
                                     <td class="forYellowGradient" contenteditable="false" style="">
                                         <span class="gamenameeach" contenteditable="true" style="">Shimla super</span>
-                                        <br contenteditable="false" style=""> <span contenteditable="true">07:50 PM</span> <br contenteditable="false" style="">
+                                        <br contenteditable="false" style=""> <span contenteditable="true">07:35 PM</span> <br contenteditable="false" style="">
                                     </td>
                                     <td contenteditable="true" style="">60</td>
-                                    <td contenteditable="true" style="user-select: text; pointer-events: auto; outline: rgb(153, 153, 153) dashed 1px;" tabindex="0"><strong class="waitimg"><img src="uploads/wait.gif" class="img-responsive" width="30" height="30"></strong></td>
+                                    <td contenteditable="true" style="user-select: text; pointer-events: auto; outline: rgb(153, 153, 153) dashed 1px;" tabindex="0"><strong class="waitimg" contenteditable="false"><img src="uploads/wait.gif" class="img-responsive" width="30" height="30" contenteditable="false"></strong></td>
                                 </tr>
 
 
@@ -546,31 +1102,28 @@
                                 <tr>
                                     <td class="forYellowGradient" contenteditable="false" style="">
                                         <span class="gamenameeach" contenteditable="true" style="">GAZIYABAD</span>
-                                        <br contenteditable="false" style=""> <span contenteditable="true">09:30 PM</span> <br contenteditable="false" style="">
+                                        <br contenteditable="false" style=""> <span contenteditable="true">09:50 PM</span> <br contenteditable="false" style="">
                                     </td>
                                     <td contenteditable="true" style="">52</td>
-                                    <td contenteditable="true" style="user-select: text; pointer-events: auto; outline: rgb(153, 153, 153) dashed 1px;" tabindex="0"><strong class="waitimg"><img src="uploads/wait.gif" class="img-responsive" width="30" height="30"></strong></td>
+                                    <td contenteditable="true" style="user-select: text; pointer-events: auto; outline: rgb(153, 153, 153) dashed 1px;" tabindex="0"><strong class="waitimg" contenteditable="false"><img src="uploads/wait.gif" class="img-responsive" width="30" height="30" contenteditable="false"></strong></td>
                                 </tr>
 
 
                                 <tr>
                                     <td class="forYellowGradient" contenteditable="false" style="">
                                         <span class="gamenameeach" contenteditable="true" style="">Bilaspur</span>
-                                        <br contenteditable="false" style=""> <span contenteditable="true">10:20 PM</span> <br contenteditable="false" style="">
+                                        <br contenteditable="false" style=""> <span contenteditable="true">10:40 PM</span> <br contenteditable="false" style="">
                                     </td>
                                     <td contenteditable="true" style="">34</td>
-                                    <td contenteditable="true" style="user-select: text; pointer-events: auto; outline: rgb(153, 153, 153) dashed 1px;" tabindex="0"><strong class="waitimg"><img src="uploads/wait.gif" class="img-responsive" width="30" height="30"></strong></td>
+                                    <td contenteditable="true" style="user-select: text; pointer-events: auto; outline: rgb(153, 153, 153) dashed 1px;" tabindex="0"><strong class="waitimg" contenteditable="false"><img src="uploads/wait.gif" class="img-responsive" width="30" height="30" contenteditable="false"></strong></td>
                                 </tr>
-
-
-
                                 <tr>
                                     <td class="forYellowGradient" contenteditable="false" style="">
                                         <span class="gamenameeach" contenteditable="true" style="">GALI</span>
-                                        <br contenteditable="false" style=""> <span contenteditable="true">11:40 PM</span> <br contenteditable="false" style="">
+                                        <br contenteditable="false" style=""> <span contenteditable="true">11:50 PM</span> <br contenteditable="false" style="">
                                     </td>
                                     <td contenteditable="true" style="">54</td>
-                                    <td contenteditable="true" style="user-select: text; pointer-events: auto; outline: rgb(153, 153, 153) dashed 1px;" tabindex="0"><strong class="waitimg"><img src="uploads/wait.gif" class="img-responsive" width="30" height="30"></strong></td>
+                                    <td contenteditable="true" style="user-select: text; pointer-events: auto; outline: rgb(153, 153, 153) dashed 1px;" tabindex="0"><strong class="waitimg" contenteditable="false"><img src="uploads/wait.gif" class="img-responsive" width="30" height="30" contenteditable="false"></strong></td>
                                 </tr>
                             </tbody>
                         </table>
@@ -579,609 +1132,14 @@
             </div>
         </div>
     </section>
-
-
-
-
-
-
-
-
-
-    <script contenteditable="false" style="">
-      // Sync Home table 'आज का रिज़ल्ट' with server-side chart storage (fallback to localStorage)
-      (function(){
-        // Escape helper to prevent HTML injection in banner
-        function escapeHtml(str){
-          return String(str)
-            .replace(/&/g,'&amp;')
-            .replace(/</g,'&lt;')
-            .replace(/>/g,'&gt;')
-            .replace(/"/g,'&quot;')
-            .replace(/'/g,'&#039;');
-        }
-
-        // Latest update storage helpers
-        const LATEST_KEY = 'latestUpdate';
-        function setLatestUpdate(game, value){
-          try { localStorage.setItem(LATEST_KEY, JSON.stringify({ game, value, ts: Date.now() })); } catch(e){}
-        }
-        function getLatestUpdate(){
-          try {
-            const raw = localStorage.getItem(LATEST_KEY);
-            if (!raw) return null;
-            const obj = JSON.parse(raw);
-            if (!obj || !obj.game || !obj.value) return null;
-            return obj;
-          } catch(e){ return null; }
-        }
-        function renderLatestUpdate(){
-          // Clear banner (we no longer show a separate line)
-          const banner = document.getElementById('latest-update');
-          if (banner) banner.innerHTML = '';
-          // Update the featured box instead (DISAWER area)
-          const data = getLatestUpdate();
-          if (!data) return;
-          const nameEl = document.querySelector('.sattaname p');
-          const valEl = document.querySelector('.sattaresult span');
-          if (nameEl) nameEl.textContent = data.game;
-          if (valEl) renderTopFeaturedRightOnly(valEl, data.value);
-          // Sync the separate rectangle box below Telegram too
-          try { renderIntoFeaturedRect(data.value); } catch(e){}
-        }
-        function renderFeaturedValueInto(containerSpan, raw){
-          const value = String(raw||'').trim();
-          // Extract up to two numeric tokens
-          const nums = value.match(/\d+/g) || [];
-          const a = nums[0] || '';
-          const b = nums[1] || '';
-          // Always render two boxes with an arrow in between for consistent layout
-          containerSpan.innerHTML = '<span class="num"></span> <img class="sep" src="uploads/arrow.gif" alt=">" width="34" height="34" style="vertical-align:middle"> <span class="num"></span>';
-          try {
-            const boxes = containerSpan.querySelectorAll('.num');
-            if (boxes[0]) boxes[0].textContent = a;
-            if (boxes[1]) boxes[1].textContent = b;
-          } catch(e) {}
-        }
-
-        // For the TOP featured area: show the most recently typed number (last numeric token)
-        function renderTopFeaturedRightOnly(containerSpan, raw){
-          const value = String(raw||'').trim();
-          const nums = value.match(/\d+/g) || [];
-          const current = (nums.length ? String(nums[nums.length - 1]) : '').trim();
-          containerSpan.innerHTML = '<span class="num"></span>';
-          try { const box = containerSpan.querySelector('.num'); if (box) box.textContent = current; } catch(e) {}
-        }
-        function renderIntoFeaturedRect(raw){
-          const wrapRect = document.querySelector('.featured-rect');
-          if (!wrapRect) return;
-          const value = String(raw||'').trim();
-          const nums = value.match(/\d+/g) || [];
-          const a = nums[0] || '';
-          const b = nums[1] || '';
-          // ensure two .num spans exist
-          let numEls = wrapRect.querySelectorAll('.result .num');
-          if (numEls.length < 2) {
-            const resultRow = wrapRect.querySelector('.result');
-            if (resultRow) {
-              resultRow.innerHTML = '<span class="num"></span>&nbsp;<img class="sep" src="uploads/arrow.gif" alt=">">&nbsp;<span class="num"></span>';
-              numEls = wrapRect.querySelectorAll('.result .num');
-            }
-          }
-          if (numEls[0]) numEls[0].textContent = a;
-          if (numEls[1]) numEls[1].textContent = b;
-        }
-        const urlParams = new URLSearchParams(location.search);
-        const isAdmin = urlParams.get('admin') === '1' || urlParams.get('admin') === 1 || urlParams.get('admin') === true;
-        const SAFE_MODE = urlParams.get('safe') === '1';
-        // --- Client-side game mapping: display name -> canonical slug ---
-        function slugifyGameLocal(name){
-          return String(name||'')
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, '-')
-            .replace(/^-+|-+$/g, '');
-        }
-        function gameSlugFor(name){
-          const l = String(name||'').trim().toLowerCase();
-          const map = {
-            // Display -> slug remaps
-            'saharanpur city': 'alwar',
-            'gwalior': 'gwalior',
-            'delhi bazar': 'delhi-bazar',
-            'shri ganesh': 'shri-ganesh',
-            'faridabad': 'faridabad',
-            'shimla super': 'shimla-super',
-            'gaziyabad': 'gaziyabad',
-            'bilaspur': 'bilaspur'
-          };
-          return map[l] || slugifyGameLocal(l);
-        }
-        function storageKey(game, year){ return `yearchart:${gameSlugFor(game)}:${year}`; }
-        function loadDataLocal(game, year){ try { return JSON.parse(localStorage.getItem(storageKey(game,year))||'{}'); } catch { return {}; } }
-        function saveDataLocal(game, year, data){ try { localStorage.setItem(storageKey(game,year), JSON.stringify(data||{})); } catch (e){} }
-        async function fetchChart(game, year){
-          const local = loadDataLocal(game, year);
-          try {
-            const qs = new URLSearchParams({ game: gameSlugFor(game), year });
-            const res = await fetch(`/api/chart?${qs.toString()}`, { method: 'GET', headers: { 'Accept': 'application/json' } });
-            if (!res.ok) throw new Error('net');
-            const j = await res.json();
-            if (j && j.ok && j.data && typeof j.data === 'object') {
-              // Merge: server wins, but fill gaps with local values
-              return Object.assign({}, local, j.data);
-            }
-          } catch(e) {}
-          return local;
-        }
-        async function saveChart(game, year, key, value){
-          // Mirror to local first for snappy UX
-          const cur = loadDataLocal(game, year);
-          if (value === '' || value == null) { delete cur[key]; } else { cur[key] = value; }
-          saveDataLocal(game, year, cur);
-          // Try server (requires admin session). Ignore errors.
-          try {
-            const res = await fetch('/api/chart', {
-              method: 'POST',
-              credentials: 'include',
-              headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-              body: JSON.stringify({ game: gameSlugFor(game), year, key, value })
-            });
-            // no need to process response
-          } catch(e) {}
-        }
-        function todayParts(){
-          const d = new Date();
-          return { y: String(d.getFullYear()), m: String(d.getMonth()+1).padStart(2,'0'), dd: String(d.getDate()).padStart(2,'0') };
-        }
-
-        // Ensure DISAWER hero box reflects backend value even for first-time visitors
-        async function fetchAndRenderDisawer(){
-          const { y, m, dd } = todayParts();
-          const todayKey = `${dd}-${m}`;
-          try {
-            const obj = await fetchChart('Disawer', y);
-            if (obj && typeof obj === 'object') {
-              let val = '';
-              if (Object.prototype.hasOwnProperty.call(obj, todayKey)) {
-                val = obj[todayKey] || '';
-              }
-              // Fallback: pick the latest DD-MM key if today missing
-              if (!val) {
-                const keys = Object.keys(obj).filter(k => /^\d{2}-\d{2}$/.test(k));
-                if (keys.length) {
-                  keys.sort((a,b) => {
-                    const [da, ma] = a.split('-').map(n=>parseInt(n,10));
-                    const [db, mb] = b.split('-').map(n=>parseInt(n,10));
-                    const ta = new Date(parseInt(y,10), ma-1, da).getTime();
-                    const tb = new Date(parseInt(y,10), mb-1, db).getTime();
-                    return ta - tb;
-                  });
-                  const lastKey = keys[keys.length-1];
-                  val = obj[lastKey] || '';
-                }
-              }
-              if (val) {
-                // Only update the DISAWER rectangle box; do NOT override the global latest update/top banner
-                try { renderIntoFeaturedRect(val); } catch(e){}
-              }
-            }
-          } catch(e){}
-        }
-
-        function prefillFromStorage(){
-          const table = document.querySelector('.tablebox1 table');
-          if (!table) return;
-          const tbody = table.querySelector('tbody');
-          if (!tbody) return;
-          const { y, m, dd } = todayParts();
-          const key = `${dd}-${m}`;
-          const rows = Array.from(tbody.querySelectorAll('tr'));
-          const cache = new Map(); // game -> data
-          const BATCH = 6;
-          let i = 0;
-          const step = async () => {
-            let count = 0;
-            while (i < rows.length && count < BATCH) {
-              const tr = rows[i++];
-              const a = tr.querySelector('.gamenameeach');
-              if (!a) { count++; continue; }
-              const game = (a.textContent || '').trim();
-              const tds = tr.querySelectorAll('td');
-              if (tds.length >= 3) {
-                const resultTd = tds[2];
-                let obj = cache.get(game);
-                if (!obj) { obj = await fetchChart(game, y); cache.set(game, obj); }
-                if (obj && Object.prototype.hasOwnProperty.call(obj, key)) {
-                  const hasChild = resultTd.childElementCount > 0;
-                  const txtNow = (resultTd.textContent || '').trim();
-                  if (!hasChild && (txtNow === '' || txtNow === '-')) {
-                    resultTd.textContent = obj[key];
-                  }
-                }
-              }
-              count++;
-            }
-            if (i < rows.length) setTimeout(step, 0);
-          };
-          setTimeout(step, 0);
-        }
-
-        function stripDashPlaceholders(){
-          const table = document.querySelector('.tablebox1 table');
-          if (!table) return;
-          const tbody = table.querySelector('tbody');
-          if (!tbody) return;
-          tbody.querySelectorAll('tr').forEach(tr => {
-            const tds = tr.querySelectorAll('td');
-            if (tds.length < 3) return;
-            const resultTd = tds[2];
-            if (resultTd && resultTd.childElementCount === 0 && (resultTd.textContent||'').trim() === '-') {
-              resultTd.textContent = '';
-            }
-          });
-        }
-
-        // Visitors (non-admin): harden UI to be read-only
-        function lockVisitorView(){
-          if (isAdmin) return;
-          const table = document.querySelector('.tablebox1 table');
-          if (!table) return;
-          const tbody = table.querySelector('tbody');
-          if (!tbody) return;
-          tbody.querySelectorAll('tr').forEach(tr => {
-            const tds = tr.querySelectorAll('td');
-            if (tds.length < 3) return;
-            const prevTd = tds[1];
-            const resultTd = tds[2];
-            // Ensure both columns look same but are non-editable
-            [prevTd, resultTd].forEach(td => {
-              if (!td) return;
-              td.setAttribute('contenteditable','false');
-              td.style.pointerEvents = 'none';
-              td.style.userSelect = 'none';
-              td.style.outline = 'none';
-            });
-          });
-        }
-
-        // For both columns 2 (कल आया था) and 3 (आज का रिज़ल्ट): if text is '*w', show wait.gif
-        function applyWaitShortcodeToResults(){
-          const table = document.querySelector('.tablebox1 table');
-          if (!table) return;
-          const tbody = table.querySelector('tbody');
-          if (!tbody) return;
-          const IMG_SRC = 'uploads/wait.gif';
-          tbody.querySelectorAll('tr').forEach(tr => {
-            const tds = tr.querySelectorAll('td');
-            if (tds.length < 3) return;
-            const cols = [tds[1], tds[2]];
-            cols.forEach(td => {
-              const txt = (td.textContent||'').trim();
-              if (txt === '*w' && !td.querySelector('img')) {
-                td.innerHTML = '<strong class="waitimg"><img src="'+IMG_SRC+'" class="img-responsive" width="40" height="40" alt="wait"></strong>';
-              }
-            });
-          });
-        }
-
-        function cleanPlaceholders(){
-          if (!isAdmin) return;
-          const table = document.querySelector('.tablebox1 table');
-          if (!table) return;
-          const tbody = table.querySelector('tbody');
-          if (!tbody) return;
-          tbody.querySelectorAll('tr').forEach(tr => {
-            const tds = tr.querySelectorAll('td');
-            if (tds.length < 3) return;
-            const resultTd = tds[2];
-            if (resultTd.querySelector('img')) {
-              resultTd.textContent = '-';
-            }
-          });
-        }
-
-        function bindPersist(){
-          if (!isAdmin) return; // only admins can persist changes
-          const table = document.querySelector('.tablebox1 table');
-          if (!table) return;
-          const tbody = table.querySelector('tbody');
-          if (!tbody) return;
-          const { y, m, dd } = todayParts();
-          const key = `${dd}-${m}`;
-          async function handle(tr){
-            const a = tr.querySelector('.gamenameeach');
-            if (!a) return;
-            const game = (a.textContent || '').trim();
-            const tds = tr.querySelectorAll('td');
-            if (tds.length < 3) return;
-            const resultTd = tds[2];
-            const val = (resultTd.textContent || '').trim();
-            // If admin typed '*w', show waiting gif and clear today's saved value
-            if (isAdmin && val.toLowerCase() === '*w') {
-              resultTd.innerHTML = '<strong class="waitimg"><img src="uploads/wait.gif" class="img-responsive" width="30" height="30"></strong>';
-              const obj = loadDataLocal(game, y);
-              if (obj && Object.prototype.hasOwnProperty.call(obj, key)) { delete obj[key]; }
-              saveDataLocal(game, y, obj);
-              await saveChart(game, y, key, '');
-              // do not announce latest update for waiting state
-              return;
-            }
-            if (!game) return;
-            await saveChart(game, y, key, val);
-            // Announce latest update for all viewers
-            if (val && val !== '-') {
-              setLatestUpdate(game, val);
-              renderLatestUpdate();
-            }
-          }
-          // Delegate input/blur events on the tbody
-          tbody.addEventListener('input', (e) => {
-            const td = e.target.closest('td');
-            const tr = td && td.closest('tr');
-            if (!tr) return;
-            handle(tr);
-          });
-          tbody.addEventListener('blur', (e) => {
-            const td = e.target.closest('td');
-            const tr = td && td.closest('tr');
-            if (!tr) return;
-            handle(tr);
-          }, true);
-        }
-
-        function enableAdminEditing(){
-          if (!isAdmin) return; // only admins can edit
-          const table = document.querySelector('.tablebox1 table');
-          if (!table) return;
-          const tbody = table.querySelector('tbody');
-          if (!tbody) return;
-          // Remove blocking contenteditable="false" on ancestors for result cells only
-          function unblockAncestors(node){
-            let cur = node.parentElement;
-            while (cur && cur !== document.body){
-              if (cur.hasAttribute('contenteditable') && cur.getAttribute('contenteditable') === 'false') {
-                cur.removeAttribute('contenteditable');
-              }
-              cur = cur.parentElement;
-            }
-          }
-          tbody.querySelectorAll('tr').forEach(tr => {
-            const tds = tr.querySelectorAll('td');
-            if (tds.length < 3) return;
-            const resultTd = tds[2];
-            // Ensure no ancestor blocks editing for this cell
-            unblockAncestors(resultTd);
-            resultTd.setAttribute('contenteditable','true');
-            resultTd.setAttribute('tabindex','0');
-            resultTd.style.outline = '1px dashed #999';
-            resultTd.style.userSelect = 'text';
-            resultTd.style.pointerEvents = 'auto';
-            // If the cell currently contains an image (wait.gif), allow typing to replace it
-            resultTd.addEventListener('keydown', (evt) => {
-              const printable = evt.key.length === 1 || ['Backspace','Delete','Enter','Space'].includes(evt.key);
-              if (printable && resultTd.querySelector('img')) {
-                // Clear gif so user can type
-                resultTd.textContent = '';
-              }
-            });
-            resultTd.addEventListener('focusin', () => {
-              if (resultTd.querySelector('img')) {
-                // Clear on focus so caret can be placed for typing
-                resultTd.textContent = '';
-              }
-            });
-          });
-        }
-
-        // Initialize
-        window.addEventListener('DOMContentLoaded', function(){
-          // Pause marquee in safe mode to reduce continuous layout
-          if (SAFE_MODE) {
-            try { document.querySelectorAll('marquee').forEach(m => m.stop && m.stop()); } catch(e){}
-          }
-          prefillFromStorage();
-          stripDashPlaceholders();
-          applyWaitShortcodeToResults();
-          // Always load today's DISAWER from server and render the hero box
-          fetchAndRenderDisawer();
-          // Lightweight polling to catch backend updates within a minute
-          setInterval(fetchAndRenderDisawer, 60000);
-          if (isAdmin) {
-            bindPersist();
-            enableAdminEditing();
-            bindFeaturedRectEditing();
-          } else {
-            lockVisitorView();
-          }
-          // Render latest update from saved state on load
-          renderLatestUpdate();
-        });
-
-        // Allow admin to edit the top featured numeric boxes directly; saves to Disawer today's chart key
-        function bindFeaturedAdminEditing(){
-          try {
-            const wrap = document.querySelector('.sattaresult span');
-            const title = document.querySelector('.sattaname p');
-            if (!wrap) return;
-            // If current content is plain text, normalize into structure
-            renderFeaturedValueInto(wrap, (wrap.textContent||'').trim());
-            // Ensure two boxes exist even if only one number was present
-            const nums = wrap.querySelectorAll('.num');
-            if (nums.length === 0) {
-              wrap.innerHTML = '<span class="num"></span> <img class="sep" src="uploads/arrow.gif" alt=">" width="34" height="34" style="vertical-align:middle"> <span class="num"></span>';
-            } else if (nums.length === 1) {
-              wrap.insertAdjacentHTML('beforeend', ' <img class="sep" src="uploads/arrow.gif" alt=">" width="34" height="34" style="vertical-align:middle"> <span class="num"></span>');
-            } else if (!wrap.querySelector('img.sep')) {
-              nums[0].insertAdjacentHTML('afterend', ' <img class="sep" src="uploads/arrow.gif" alt=">" width="34" height="34" style="vertical-align:middle"> ');
-            }
-            // Make numbers editable
-            wrap.querySelectorAll('.num').forEach(el => {
-              el.setAttribute('contenteditable','true');
-              el.setAttribute('tabindex','0');
-              el.style.outline = '1px dashed #999';
-              el.addEventListener('keydown', (evt) => {
-                // allow only digits and basic editing
-                const allowed = /[0-9]/.test(evt.key) || ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'].includes(evt.key);
-                if (!allowed) evt.preventDefault();
-              });
-              // Ensure clicking a box focuses it and places caret at end
-              el.addEventListener('mousedown', (evt) => {
-                try { evt.stopPropagation(); evt.stopImmediatePropagation(); } catch {}
-                evt.preventDefault();
-                el.focus();
-                try {
-                  const sel = window.getSelection();
-                  const range = document.createRange();
-                  range.selectNodeContents(el);
-                  range.collapse(false);
-                  sel.removeAllRanges();
-                  sel.addRange(range);
-                } catch {}
-              });
-              const onCommit = async () => {
-                const a = (wrap.querySelectorAll('.num')[0]?.textContent||'').trim();
-                const b = (wrap.querySelectorAll('.num')[1]?.textContent||'').trim();
-                const val = [a,b].filter(Boolean).join(' ');
-                // Save under canonical game name
-                const game = 'Disawer';
-                const { y, m, dd } = todayParts();
-                const key = `${dd}-${m}`;
-                await saveChart(game, y, key, val);
-                if (val) { setLatestUpdate(game, val); renderLatestUpdate(); }
-                try { if (title) title.textContent = 'DISAWER'; } catch {}
-              };
-              el.addEventListener('input', onCommit);
-              el.addEventListener('blur', onCommit);
-            });
-            // Make clicking the result row focus the appropriate editable box (left/right)
-            const resultRow = wrap;
-            resultRow.addEventListener('mousedown', (evt) => {
-              const nums = resultRow.querySelectorAll('.num');
-              if (!nums.length) return;
-              const first = nums[0];
-              const second = nums[1] || null;
-              const target = evt.target;
-              // If user clicked directly on a .num, focus that
-              if (target && target.classList && target.classList.contains('num')) {
-                target.focus();
-                return;
-              }
-              // If user clicked on the arrow image or the right half, focus the second box
-              const rectBox = resultRow.getBoundingClientRect();
-              const clickX = evt.clientX;
-              const clickedRightHalf = (clickX - rectBox.left) > rectBox.width / 2;
-              if (second && ((target && target.classList && target.classList.contains('sep')) || clickedRightHalf)) {
-                second.focus();
-                return;
-              }
-              // Default: focus first
-              first.focus();
-            });
-          } catch(e) { /* no-op */ }
-        }
-        // Allow admin to edit the DISAWER rectangle box directly; saves to Disawer today's chart key
-        function bindFeaturedRectEditing(){
-          try {
-            if (!isAdmin) return; // only admins can edit
-            const rect = document.querySelector('.featured-rect.disawer-hero');
-            if (!rect) return;
-            const resultRow = rect.querySelector('.result');
-            if (!resultRow) return;
-            // Unblock any ancestor that might carry contenteditable="false"
-            function unblockAncestors(node){
-              let cur = node && node.parentElement;
-              while (cur && cur !== document.body){
-                if (cur.hasAttribute('contenteditable') && cur.getAttribute('contenteditable') === 'false') {
-                  cur.removeAttribute('contenteditable');
-                }
-                cur = cur.parentElement;
-              }
-            }
-            unblockAncestors(resultRow);
-            // Ensure there are exactly two .num spans with a separator image in between
-            const currentNums = resultRow.querySelectorAll('.num');
-            if (currentNums.length === 0) {
-              resultRow.innerHTML = '<span class="num"></span>&nbsp;<img class="sep" src="uploads/arrow.gif" alt=">">&nbsp;<span class="num"></span>';
-            } else if (currentNums.length === 1) {
-              // insert arrow and second box
-              currentNums[0].insertAdjacentHTML('afterend', '&nbsp;<img class="sep" src="uploads/arrow.gif" alt=">">&nbsp;<span class="num"></span>');
-            } else if (!resultRow.querySelector('img.sep')) {
-              // two nums but missing arrow
-              currentNums[0].insertAdjacentHTML('afterend', ' <img class="sep" src="uploads/arrow.gif" alt=">"> ');
-            }
-            const nums = resultRow.querySelectorAll('.num');
-            nums.forEach(el => {
-              el.setAttribute('contenteditable','true');
-              el.setAttribute('tabindex','0');
-              el.style.outline = '1px dashed #999';
-              el.style.pointerEvents = 'auto';
-              el.style.userSelect = 'text';
-              // Strongly focus the clicked box and stop bubbling so row handler won't override
-              el.addEventListener('mousedown', (evt) => {
-                try { evt.stopPropagation(); evt.stopImmediatePropagation(); } catch {}
-                // prevent selection on image drag etc.
-                evt.preventDefault();
-                el.focus();
-                // place caret at end
-                try {
-                  const sel = window.getSelection();
-                  const range = document.createRange();
-                  range.selectNodeContents(el);
-                  range.collapse(false);
-                  sel.removeAllRanges();
-                  sel.addRange(range);
-                } catch {}
-              });
-              el.addEventListener('keydown', (evt) => {
-                const allowed = /[0-9]/.test(evt.key) || ['Backspace','Delete','ArrowLeft','ArrowRight','Tab'].includes(evt.key);
-                if (!allowed) evt.preventDefault();
-              });
-              const onCommit = async () => {
-                const a = (resultRow.querySelectorAll('.num')[0]?.textContent||'').trim();
-                const b = (resultRow.querySelectorAll('.num')[1]?.textContent||'').trim();
-                const val = [a,b].filter(Boolean).join(' ');
-                const game = 'Disawer';
-                const { y, m, dd } = todayParts();
-                const key = `${dd}-${m}`;
-                await saveChart(game, y, key, val);
-                if (val) { setLatestUpdate('DISAWER', val); renderLatestUpdate(); }
-              };
-              el.addEventListener('input', onCommit);
-              el.addEventListener('blur', onCommit);
-            });
-            // Row-level mousedown to choose left/right when clicking arrow or halves
-            resultRow.addEventListener('mousedown', (evt) => {
-              const numsNow = resultRow.querySelectorAll('.num');
-              if (!numsNow.length) return;
-              const first = numsNow[0];
-              const second = numsNow[1] || null;
-              const target = evt.target;
-              // Click on arrow image or right half -> focus right
-              const rectBox = resultRow.getBoundingClientRect();
-              const clickX = evt.clientX;
-              const clickedRightHalf = (clickX - rectBox.left) > rectBox.width / 2;
-              if (second && ((target && target.classList && target.classList.contains('sep')) || clickedRightHalf)) {
-                evt.preventDefault();
-                second.focus();
-                return;
-              }
-              // Otherwise focus left
-              evt.preventDefault();
-              first.focus();
-            });
-          } catch(e) { /* no-op */ }
-        }
-      })();
-    </script>
     <section class="callbox" contenteditable="false" style="">
         <div class="text-center" contenteditable="false" style="">
             <div style="position: relative; min-height: 1px; padding-right: 0px; padding-left: 0px;" contenteditable="false">
                 <div class="card" style="box-sizing: border-box; position: relative; display: flex; flex-direction: column; min-width: 0px; overflow-wrap: break-word; background-clip: border-box; border: 0px; border-radius: 0.25rem;" contenteditable="false">
                     <div class="card-body" style="box-sizing: border-box; flex: 1 1 auto; min-height: 1px; padding: 1.25rem; border: dashed red; background: linear-gradient(rgb(255, 216, 0), rgb(255, 255, 255)); border-radius: 20px; line-height: 15px;" contenteditable="false">
                         <p contenteditable="false" style=""><strong contenteditable="true" style="">नमस्कार साथियो</strong><strong contenteditable="false" style=""> </strong></p>
-
                         <p contenteditable="false" style=""><strong contenteditable="true" style="">अपनी गेम का रिजल्ट हमारी web साइट पर लगवाने के लिए संपर्क करें।&nbsp; &nbsp;</strong></p>
-                        <p contenteditable="false" style=""><big contenteditable="false" style=""><strong contenteditable="true" style="">ARUN BHAI&nbsp;</strong></big></p>
+                        <p contenteditable="false" style=""><big contenteditable="false" style=""><strong contenteditable="true" style="">BANSAL BHAI&nbsp;</strong></big></p>
                         <p contenteditable="false" style="">
                             <a href="https://Wa.me/" target="_blank" contenteditable="false" style=""><img src="https://lucky-satta.com/whatsAppChat.png" style="height: 80px; margin: auto; width: 230px;" contenteditable="false"></a>
                         </p>
@@ -1191,12 +1149,6 @@
             </div>
         </div>
     </section>
-
-
-
-
-
-
     <section class="" contenteditable="false" style="">
         <div class="container" contenteditable="false" style="">
             <div class="row" contenteditable="false" style="">
@@ -1229,20 +1181,17 @@
             </div>
         </div>
     </section>
-
     <section class="somelinks2" contenteditable="false" style="">
         <div class="container" contenteditable="false" style="">
             <div class="row" contenteditable="false" style="">
                 <div class="col-md-12 text-center" contenteditable="false" style="">
                     <strong contenteditable="true" style="">@ 2025 Lucky Satta :: ALL RIGHTS RESERVED</strong>
                 </div>
-
             </div>
         </div>
     </section>
     <!--script-->
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.2.4/jquery.min.js" contenteditable="false" style=""></script>
-
     <script src="https://stackpath.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js" integrity="sha384-aJ21OjlMXNL5UyIl/XNwTMqvzeRMZH2w8c5cRVpzpU8Y5bApTppSuUkhZXN0VxHd" crossorigin="anonymous" contenteditable="false" style=""></script>
     <script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/jquery.lazy/1.7.9/jquery.lazy.min.js" contenteditable="false" style=""></script>
     <script contenteditable="false" style="">
@@ -1252,28 +1201,6 @@
     </script>
     <script src="bootstrap-theme.js" contenteditable="false" style=""></script>
     <script src="site-config.js" contenteditable="false" style=""></script>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-<div id="windsurf-browser-preview-root" contenteditable="false" style="position: fixed; bottom: 0px; right: 0px; z-index: 2147483646;"></div></body></html>
+    <div id="windsurf-browser-preview-root" contenteditable="false" style="position: fixed; bottom: 0px; right: 0px; z-index: 2147483646;"></div>
+  </body>
+</html>

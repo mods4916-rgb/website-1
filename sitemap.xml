@@ -2,62 +2,53 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://yourdomain.com/</loc>
-    <changefreq>weekly</changefreq>
+    <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://yourdomain.com/index.html</loc>
-    <changefreq>weekly</changefreq>
+    <loc>https://yourdomain.com/index.php</loc>
+    <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://yourdomain.com/admin.html</loc>
-    <changefreq>monthly</changefreq>
+    <loc>https://yourdomain.com/admin.php</loc>
+    <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://yourdomain.com/login.html</loc>
+    <loc>https://yourdomain.com/login.php</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://yourdomain.com/chart.html</loc>
+    <loc>https://yourdomain.com/chart.php</loc>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
   </url>
+  <!-- Canonical year chart pages (query params allowed in sitemap) -->
   <url>
-    <loc>https://yourdomain.com/year-agra.html</loc>
+    <loc>https://yourdomain.com/year.php?game=disawer&amp;year=2025</loc>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://yourdomain.com/year-alwar.html</loc>
+    <loc>https://yourdomain.com/year.php?game=faridabad&amp;year=2025</loc>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://yourdomain.com/year-disawer.html</loc>
+    <loc>https://yourdomain.com/year.php?game=gali&amp;year=2025</loc>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://yourdomain.com/year-faridabad.html</loc>
+    <loc>https://yourdomain.com/year.php?game=delhi-bazar&amp;year=2025</loc>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://yourdomain.com/year-gali.html</loc>
+    <loc>https://yourdomain.com/year.php?game=shimla-super&amp;year=2025</loc>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
-  </url>
-  <url>
-    <loc>https://yourdomain.com/year-sadar-bazar.html</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-  </url>
-  <url>
-    <loc>https://yourdomain.com/start-here.html</loc>
-    <changefreq>rarely</changefreq>
-    <priority>0.6</priority>
   </url>
 </urlset>
