@@ -1,3 +1,4 @@
+<?php include 'config.php'; ?>
 <?php
 // admin.php - PHP version of admin.html
 ?>

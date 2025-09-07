@@ -1,3 +1,4 @@
+<?php include 'config.php'; ?>
 <?php
 // chart.php - PHP version of chart.html
 ?>
