@@ -1,4 +1,3 @@
-<?php include 'config.php'; ?>
 <?php
 // login.php - PHP version of login.html
 ?>
