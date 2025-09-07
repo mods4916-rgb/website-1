@@ -481,17 +481,20 @@
                 if (!objToday) { objToday = await fetchChart(game, y); cache.set(game, objToday); }
                 if (objToday && Object.prototype.hasOwnProperty.call(objToday, keyToday)) {
                   todayTd.textContent = objToday[keyToday] || '';
+                  applyWaitShortcodeToCell(todayTd);
                 }
                 // Yesterday may be in previous year
                 if (yst.y === y) {
                   if (objToday && Object.prototype.hasOwnProperty.call(objToday, keyYest)) {
                     prevTd.textContent = objToday[keyYest] || '-';
+                    applyWaitShortcodeToCell(prevTd);
                   }
                 } else {
                   let objPrev = cachePrevYear.get(game);
                   if (!objPrev) { objPrev = await fetchChart(game, yst.y); cachePrevYear.set(game, objPrev); }
                   if (objPrev && Object.prototype.hasOwnProperty.call(objPrev, keyYest)) {
                     prevTd.textContent = objPrev[keyYest] || '-';
+                    applyWaitShortcodeToCell(prevTd);
                   }
                 }
               }
@@ -576,11 +579,22 @@
             const cols = [tds[1], tds[2]];
             cols.forEach(td => {
               const txt = (td.textContent||'').trim();
-              if (txt === '*w' && !td.querySelector('img')) {
+              if (txt.toLowerCase() === '*w' && !td.querySelector('img')) {
                 td.innerHTML = '<strong class="waitimg"><img src="'+IMG_SRC+'" class="img-responsive" width="40" height="40" alt="wait"></strong>';
               }
             });
           });
+        }
+
+        function applyWaitShortcodeToCell(td){
+          if (!td) return;
+          try {
+            const IMG_SRC = 'uploads/wait.gif';
+            const txt = (td.textContent||'').trim();
+            if (txt && txt.toLowerCase() === '*w' && !td.querySelector('img')) {
+              td.innerHTML = '<strong class="waitimg"><img src="'+IMG_SRC+'" class="img-responsive" width="40" height="40" alt="wait"></strong>';
+            }
+          } catch(_) {}
         }
 
         function bindPersist(){
@@ -607,30 +621,41 @@
             if (tds.length < 3) return;
             const prevTd = tds[1];
             const todayTd = tds[2];
+            function cellVal(td){
+              if (!td) return '';
+              // Detect spinner markup inserted for '*w' (wrapped with .waitimg)
+              try { if (td.querySelector && td.querySelector('.waitimg img')) return '*w'; } catch(_) {}
+              return (td.textContent || '').trim();
+            }
             // Determine which column was changed and queue only
             if (changedTd && changedTd.isSameNode(todayTd)) {
-              let val = (todayTd.textContent || '').trim();
+              let val = cellVal(todayTd);
               if (val.toLowerCase() === '*w') {
                 todayTd.innerHTML = '<strong class="waitimg"><img src="uploads/wait.gif" class="img-responsive" width="30" height="30"></strong>';
-                queueChange(game, tgtToday.y, keyToday, '');
+                queueChange(game, tgtToday.y, keyToday, '*w');
                 return;
               }
               queueChange(game, tgtToday.y, keyToday, val);
               renderTopFeatured(game, val);
             } else if (changedTd && changedTd.isSameNode(prevTd)) {
-              const valPrev = (prevTd.textContent || '').trim();
+              const valPrev = cellVal(prevTd);
+              if (valPrev.toLowerCase() === '*w') {
+                prevTd.innerHTML = '<strong class="waitimg"><img src="uploads/wait.gif" class="img-responsive" width="30" height="30"></strong>';
+                queueChange(game, tgtYest.y, keyYest, '*w');
+                return;
+              }
               queueChange(game, tgtYest.y, keyYest, valPrev);
             } else {
               // Fallback: queue both columns
-              const vToday = (todayTd.textContent || '').trim();
+              const vToday = cellVal(todayTd);
               queueChange(game, tgtToday.y, keyToday, vToday);
-              const vPrev = (prevTd.textContent || '').trim();
+              const vPrev = cellVal(prevTd);
               queueChange(game, tgtYest.y, keyYest, vPrev);
             }
             // Update the top featured box to reflect the row just edited
             try {
-              const tVal = (todayTd.textContent || '').trim();
-              const pVal = (prevTd.textContent || '').trim();
+              const tVal = cellVal(todayTd);
+              const pVal = cellVal(prevTd);
               const displayVal = tVal !== '' && tVal !== '-' ? tVal : pVal;
               if (displayVal) renderTopFeatured(game, displayVal);
             } catch(_){ }
@@ -818,33 +843,6 @@
             btn.disabled = true;
             btn.addEventListener('click', (e)=>{ e.preventDefault(); btn.textContent = 'Saving...'; btn.disabled = true; commitPending(); });
             document.body.appendChild(btn);
-
-            // Inject Apply button for admin (forces frontend refresh across tabs)
-            const applyBtn = document.createElement('button');
-            applyBtn.id = 'admin-apply-btn';
-            applyBtn.textContent = 'Apply';
-            applyBtn.style.position = 'fixed';
-            applyBtn.style.bottom = '16px';
-            applyBtn.style.right = '110px';
-            applyBtn.style.zIndex = '10000';
-            applyBtn.style.padding = '10px 16px';
-            applyBtn.style.fontWeight = 'bold';
-            applyBtn.style.borderRadius = '10px';
-            applyBtn.style.border = '2px solid black';
-            applyBtn.style.background = '#ffd54f';
-            applyBtn.style.color = 'black';
-            applyBtn.title = 'Force refresh on public pages';
-            applyBtn.addEventListener('click', (e)=>{
-              e.preventDefault();
-              try {
-                localStorage.setItem('games_refresh', String(Date.now()));
-                localStorage.setItem('chart_refresh', String(Date.now()));
-              } catch(_) {}
-              // Also refresh within this admin view instantly
-              if (window.refreshDisplays) window.refreshDisplays();
-              try { siteSyncChan && siteSyncChan.postMessage({ type: 'refresh', at: Date.now() }); } catch(_) {}
-            });
-            document.body.appendChild(applyBtn);
           } else {
             lockVisitorView();
             // For visitors, always show the last updated game/value at top

@@ -10,13 +10,13 @@
   <style>
     html, body { height: 100%; margin: 0; background: #fff; font-family: Arial, sans-serif; }
     .navbar, .header, .title-header, .status { display: none !important; }
-    /* Hide Save button and status permanently */
-    .save-fab, .save-status { display: none !important; }
+    /* Ensure Save button and status are visible above iframe */
+    .save-fab, .save-status { display: block !important; }
     .save-fab {
       position: fixed;
       top: 10px;
       right: 10px;
-      z-index: 1000;
+      z-index: 99999;
       padding: 10px 16px;
       font-weight: bold;
       border-radius: 10px;
@@ -27,15 +27,14 @@
       box-shadow: 0 4px 10px rgba(0,0,0,0.15);
     }
     .save-fab:disabled { opacity: 0.6; cursor: default; }
-    .save-status { position: fixed; top: 10px; right: 110px; z-index: 1000; color: #2e7d32; font-weight: 600; }
+    .save-status { position: fixed; top: 10px; right: 110px; z-index: 99999; color: #2e7d32; font-weight: 600; }
     .panel { width: 100vw; height: 100vh; margin: 0; padding: 0; }
     .panel .box { width: 100%; height: 100%; border: 0; border-radius: 0; overflow: hidden; }
     .panel iframe { width: 100%; height: 100%; border: 0; background: #fff; display: block; }
   </style>
 </head>
 <body>
-  <button id="saveBtn" class="save-fab">Save</button>
-  <div id="status" class="save-status"></div>
+  <!-- Removed top Save button and status; use in-page Save from index.php admin view -->
 
   <div class="panel" style="grid-template-columns: 1fr;">
     <div class="box">
@@ -54,6 +53,7 @@
     let currentPath = (params.get('path') || 'index.php').replace(/^\/+/, '');
 
     function setStatus(msg, ok=true){
+      if (!statusEl) return;
       statusEl.textContent = msg || '';
       statusEl.style.color = ok ? '#2e7d32' : '#b00020';
     }
@@ -65,6 +65,7 @@
     }
 
     function updateSaveButtonState() {
+      if (!saveBtn) return;
       try {
         const p = (currentPath || '').replace(/[?#].*$/, '');
         const ok = /\.php$/i.test(p);
@@ -105,7 +106,7 @@
         } catch {}
         if (!/\.php$/i.test(filePath)) { setStatus('Only .php files are allowed', false); updateSaveButtonState(); return; }
         setStatus(`Saving ${filePath}...`);
-        saveBtn.disabled = true;
+        if (saveBtn) saveBtn.disabled = true;
         const doc = preview.contentWindow.document;
         const clone = doc.documentElement.cloneNode(true);
         clone.querySelectorAll('[data-admin-only]')?.forEach(el => el.remove());
@@ -140,7 +141,7 @@
         setStatus(e.message || 'Save failed', false);
       }
       finally {
-        saveBtn.disabled = false;
+        if (saveBtn) saveBtn.disabled = false;
       }
     }
 
@@ -302,7 +303,7 @@
 
     function installChartYearTools(doc) { /* omitted for brevity in PHP clone */ }
 
-    saveBtn.addEventListener('click', savePage);
+    if (saveBtn) saveBtn.addEventListener('click', savePage);
 
     (async function(){
       try {
